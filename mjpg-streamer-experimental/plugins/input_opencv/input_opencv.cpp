@@ -272,11 +272,11 @@ int input_init(input_parameter *param, int plugin_no)
         goto fatal_error;
     }
     
-    pctx->capture.set(CAP_PROP_FRAME_WIDTH, width);
-    pctx->capture.set(CAP_PROP_FRAME_HEIGHT, height);
+    pctx->capture.set(CV_CAP_PROP_FRAME_WIDTH, width);
+    pctx->capture.set(CV_CAP_PROP_FRAME_HEIGHT, height);
     
     if (settings->fps_set)
-        pctx->capture.set(CAP_PROP_FPS, settings->fps);
+        pctx->capture.set(CV_CAP_PROP_FPS, settings->fps);
     
     /* filter stuff goes here */
     if (filter != NULL) {
@@ -396,12 +396,12 @@ void *worker_thread(void *arg)
             CVOPT_OPT(prop, var,desc) \
         }
     
-    CVOPT_SET(CAP_PROP_FPS, fps, "frames per second")
-    CVOPT_SET(CAP_PROP_BRIGHTNESS, co, "contrast")
-    CVOPT_SET(CAP_PROP_CONTRAST, br, "brightness")
-    CVOPT_SET(CAP_PROP_SATURATION, sa, "saturation")
-    CVOPT_SET(CAP_PROP_GAIN, gain, "gain")
-    CVOPT_SET(CAP_PROP_EXPOSURE, ex, "exposure")
+    CVOPT_SET(CV_CAP_PROP_FPS, fps, "frames per second")
+    CVOPT_SET(CV_CAP_PROP_BRIGHTNESS, co, "contrast")
+    CVOPT_SET(CV_CAP_PROP_CONTRAST, br, "brightness")
+    CVOPT_SET(CV_CAP_PROP_SATURATION, sa, "saturation")
+    CVOPT_SET(CV_CAP_PROP_GAIN, gain, "gain")
+    CVOPT_SET(CV_CAP_PROP_EXPOSURE, ex, "exposure")
     
     /* setup imencode options */
     vector<int> compression_params;
