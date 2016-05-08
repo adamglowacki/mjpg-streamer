@@ -55,6 +55,7 @@ add_subdirectory(plugins/output_http)
 add_subdirectory(plugins/output_rtsp)
 add_subdirectory(plugins/output_udp)
 add_subdirectory(plugins/output_viewer)
+add_subdirectory(plugins/output_tcp)
 
 #
 # mjpg_streamer executable
