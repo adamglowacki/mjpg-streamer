@@ -74,7 +74,7 @@ void help(void) {
 }
 
 void worker_cleanup(void *arg) {
-  static is_first_run = true;
+  static bool is_first_run = true;
 
   if(!is_first_run) {
     DBG("already cleaned up resources\n");
@@ -86,7 +86,6 @@ void worker_cleanup(void *arg) {
 
   if(frame != NULL)
     free(frame);
-  close(fd);
 }
 
 void *worker_thread(void *arg) {
@@ -99,9 +98,18 @@ void *worker_thread(void *arg) {
   return NULL;
 }
 
+static inline bool is_arg(const char *chosen, const char *short_option,
+    const char *long_option) {
+  if (strcmp(chosen, short_option) == 0)
+    return true;
+  if (strcmp(chosen, long_option) == 0)
+    return true;
+  return false;
+}
+
 /* return zero if everything is ok */
 int output_init(output_parameter *param) {
-  param->argv[0] = OUTPUT_PLUGIN_NAME;
+  param->argv[0] = PLUGIN_NAME;
   /* show all parameters for debug purposes */
   uint32_t i;
   for(i = 0; i < param->argc; i++)
@@ -116,7 +124,7 @@ int output_init(output_parameter *param) {
       {SHORT_ADDR, required_argument, 0, 0},
       {LONG_ADDR, required_argument, 0, 0},
       {SHORT_PORT, required_argument, 0, 0},
-      {LONG_PORT, required_argument, 0, 0}
+      {LONG_PORT, required_argument, 0, 0},
       {SHORT_WINDOW, required_argument, 0, 0},
       {LONG_WINDOW, required_argument, 0, 0},
       {SHORT_TIMEOUT, required_argument, 0, 0},
@@ -137,35 +145,30 @@ int output_init(output_parameter *param) {
     /* internal bug */
     if (!(option_index + 1 < array_size(long_options)))
       return 1;
-    if (option_index == 0 || option_index == 1) {
-    } else if (option_index 
-
-    /* below we compare pointers, not strings; that is far more efficient */
-    char *choice = long_options[option_index][0];
-
-    if (if (strcmp(choice, short_help_param) == 0 || choice == long_help_param) {
+    const char *choice = long_options[option_index].name;
+    if (is_arg(choice, SHORT_HELP, LONG_HELP)) {
       DBG("help param");
       help();
       return 1;
-    } else if (choice == short_addr_param || choice == long_addr_param) {
+    } else if (is_arg(choice, SHORT_ADDR, LONG_ADDR)) {
       DBG("addr param");
       if (addr != NULL)
         free(addr);
       addr = malloc(strlen(optarg) + 1);
       strcpy(addr, optarg);
-    } else if (choice == short_port_param || choice == long_port_param) {
+    } else if (is_arg(choice, SHORT_PORT, LONG_PORT)) {
       DBG("port param");
       if (sscanf(optarg, "%u", &port) != 1)
         return 1;
-    } else if (choice == short_window_param || choice == long_window_param) {
+    } else if (is_arg(choice, SHORT_WINDOW, LONG_WINDOW)) {
       DBG("window param");
       if (sscanf(optarg, "%u", &window) != 1)
         return 1;
-    } else if (choice == short_timeout_param || choice == long_timeout_param) {
+    } else if (is_arg(choice, SHORT_TIMEOUT, LONG_TIMEOUT)) {
       DBG("timeout param");
       if (sscanf(optarg, "%u", &timeout_s))
         return 1;
-    } else if (choice == short_input_param || choice == long_input_param) {
+    } else if (is_arg(choice, SHORT_INPUT, LONG_INPUT)) {
       DBG("input param");
       if (sscanf(optarg, "%u", &input_number))
         return 1;
