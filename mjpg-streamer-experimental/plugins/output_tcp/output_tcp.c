@@ -23,6 +23,7 @@
 #include <fcntl.h>
 #include <time.h>
 #include <syslog.h>
+#include <netdb.h>
 
 #include <dirent.h>
 
@@ -48,12 +49,19 @@ static pthread_t worker;
 static globals *pglobal;
 static uint32_t max_frame_size;
 static uint8_t *frame = NULL;
-static uint32_t input_number = 0;
 
-static uint32_t window = 10;
-static char *addr = NULL;
-static uint32_t port = 40405;
-static uint32_t timeout_s = 30;
+static struct {
+  uint32_t input_number;
+  uint32_t window;
+  char *addr;
+  uint32_t port;
+  uint32_t timeout_s;
+} params;
+
+static struct {
+  struct addrinfo *rcv_info;
+  int sock;
+} net;
 
 void help(void) {
   fprintf(stderr,
@@ -76,7 +84,7 @@ void help(void) {
 void worker_cleanup(void *arg) {
   static bool is_first_run = true;
 
-  if(!is_first_run) {
+  if (!is_first_run) {
     DBG("already cleaned up resources\n");
     return;
   }
@@ -84,13 +92,42 @@ void worker_cleanup(void *arg) {
   is_first_run = 0;
   OPRINT("cleaning up resources allocated by worker thread\n");
 
-  if(frame != NULL)
+  if (frame != NULL)
     free(frame);
+
+  if (net.rcv_info != NULL)
+    freeaddrinfo(net.rcv_info);
+
+  if (net.sock >= 0)
+    close(net.sock);
 }
 
 void *worker_thread(void *arg) {
   /* set cleanup handler to cleanup allocated resources */
   pthread_cleanup_push(worker_cleanup, NULL);
+
+  struct addrinfo hints = {0};
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = SOCK_STREAM;
+  int x = 0;
+  do {
+    x = getaddrinfo(params.addr, NULL, &hints, &net.rcv_info);
+  } while (x != 0 && x == EAI_AGAIN);
+  if (x != 0) {
+    DBG("getaddrinfo: %s", gai_strerror(x));
+    return NULL;
+  }
+  net.sock = socket(net.rcv_info->ai_family, net.rcv_info->ai_socktype,
+      net.rcv_info->ai_protocol);
+  if (net.sock < 0) {
+    perror("socket");
+    return NULL;
+  }
+  if (connect(net.sock, net.rcv_info->ai_addr,
+        net.rcv_info->ai_addrlen) != 0) {
+    perror("connect");
+    return NULL;
+  }
 
   /* cleanup now */
   pthread_cleanup_pop(1);
@@ -114,6 +151,16 @@ int output_init(output_parameter *param) {
   uint32_t i;
   for(i = 0; i < param->argc; i++)
     DBG("argv[%d]=%s\n", i, param->argv[i]);
+
+  /* default parameters */
+  params.input_number = 0;
+  params.window = 10;
+  params.addr = NULL;
+  params.port = 40405;
+  params.timeout_s = 30;
+
+  net.rcv_info = NULL;
+  net.sock = -1;
 
   reset_getopt();
   while (true) {
@@ -152,44 +199,49 @@ int output_init(output_parameter *param) {
       return 1;
     } else if (is_arg(choice, SHORT_ADDR, LONG_ADDR)) {
       DBG("addr param");
-      if (addr != NULL)
-        free(addr);
-      addr = malloc(strlen(optarg) + 1);
-      strcpy(addr, optarg);
+      if (params.addr != NULL)
+        free(params.addr);
+      params.addr = malloc(strlen(optarg) + 1);
+      if (params.addr == 0) {
+        perror("malloc");
+        return 1;
+      }
+      strcpy(params.addr, optarg);
     } else if (is_arg(choice, SHORT_PORT, LONG_PORT)) {
       DBG("port param");
-      if (sscanf(optarg, "%u", &port) != 1)
+      if (sscanf(optarg, "%u", &params.port) != 1)
         return 1;
     } else if (is_arg(choice, SHORT_WINDOW, LONG_WINDOW)) {
       DBG("window param");
-      if (sscanf(optarg, "%u", &window) != 1)
+      if (sscanf(optarg, "%u", &params.window) != 1)
         return 1;
     } else if (is_arg(choice, SHORT_TIMEOUT, LONG_TIMEOUT)) {
       DBG("timeout param");
-      if (sscanf(optarg, "%u", &timeout_s))
+      if (sscanf(optarg, "%u", &params.timeout_s))
         return 1;
     } else if (is_arg(choice, SHORT_INPUT, LONG_INPUT)) {
       DBG("input param");
-      if (sscanf(optarg, "%u", &input_number))
+      if (sscanf(optarg, "%u", &params.input_number))
         return 1;
     }
   }
 
   pglobal = param->global;
-  if (input_number >= pglobal->incnt) {
+  if (params.input_number >= pglobal->incnt) {
     OPRINT("Error: the %u input plugin number is too much for only"
-        " %u plugins loaded\n", input_number, pglobal->incnt);
+        " %u plugins loaded\n", params.input_number, pglobal->incnt);
     return 1;
   }
-  if (addr == NULL) {
+  if (params.addr == NULL) {
     OPRINT("Error: missing recipient's address\n");
     return 1;
   }
-  OPRINT("input plugin.......: (%u) %s\n", input_number, pglobal->in[input_number].plugin);
-  OPRINT("address............: %s\n", addr);
-  OPRINT("port...............: %u\n", port);
-  OPRINT("window.............: %u frames\n", window);
-  OPRINT("timeout............: %u s\n", timeout_s);
+  OPRINT("input plugin....: (%u) %s\n", params.input_number,
+      pglobal->in[params.input_number].plugin);
+  OPRINT("address.........: %s\n", params.addr);
+  OPRINT("port............: %u\n", params.port);
+  OPRINT("window..........: %u frames\n", params.window);
+  OPRINT("timeout.........: %u s\n", params.timeout_s);
 
   return 0;
 }
