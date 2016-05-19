@@ -8,6 +8,10 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL "")
   SET(CMAKE_BUILD_TYPE "Release")
 endif()
 
+if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+  add_definitions(-DDEBUG)
+endif()
+
 SET(COMPILE_DEFINITIONS -Werror -Wall)
 
 include(CheckLibraryExists) 

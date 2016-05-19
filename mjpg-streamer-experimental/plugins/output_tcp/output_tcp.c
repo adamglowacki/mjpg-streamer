@@ -114,7 +114,7 @@ void *worker_thread(void *arg) {
     x = getaddrinfo(params.addr, NULL, &hints, &net.rcv_info);
   } while (x != 0 && x == EAI_AGAIN);
   if (x != 0) {
-    DBG("getaddrinfo: %s", gai_strerror(x));
+    DBG("getaddrinfo: %s\n", gai_strerror(x));
     return NULL;
   }
   net.sock = socket(net.rcv_info->ai_family, net.rcv_info->ai_socktype,
@@ -126,6 +126,11 @@ void *worker_thread(void *arg) {
   if (connect(net.sock, net.rcv_info->ai_addr,
         net.rcv_info->ai_addrlen) != 0) {
     perror("connect");
+    DBG("can't connect to %s at port %u\n", params.addr, params.port);
+    return NULL;
+  }
+  if (dprintf(net.sock, "Hello!\n") < 0) {
+    DBG("dprintf: error\n");
     return NULL;
   }
 
