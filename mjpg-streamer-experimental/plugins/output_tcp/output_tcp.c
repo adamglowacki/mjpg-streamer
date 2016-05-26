@@ -63,6 +63,11 @@ static struct {
   int sock;
 } net;
 
+static struct {
+  char *bytes;
+  uint32_t size;
+} buffer;
+
 void help(void) {
   fprintf(stderr,
       " ---------------------------------------------------------------\n" \
@@ -102,6 +107,29 @@ void worker_cleanup(void *arg) {
     close(net.sock);
 }
 
+bool grab_frame(uint32_t *size) {
+  uint32_t in_num = params->input_number;
+  pthread_mutex_lock(&pglobal->in[in_num].db);
+  pthread_cond_wait(&pglobal->in[in_num].db_update, &pglobal->in[in_num].db);
+  uint32_t frame_size = pglobal->in[in_num].size;
+  if (frame_size > buffer.size) {
+    DBG("increasing buffer size from %u to %u\n", buffer.size, frame_size);
+    buffer.size += 1 << 16;
+    char *tmp_bytes = realloc(buffer.bytes, buffer.size);
+    if (tmp_bytes == NULL) {
+      pthread_mutex_unlock(&pglobal->in[in_num].db);
+      LOG("not enough memory\n");
+      return false;
+    }
+    buffer.bytes = tmp_bytes;
+  }
+  memcpy(buffer.bytes, pglobal->in[in_num].buf, frame_size);
+  pthread_mutex_unlock(&pglobal->in[in_num].db);
+
+  *size = frame_size;
+  return true;
+}
+
 void *worker_thread(void *arg) {
   /* set cleanup handler to cleanup allocated resources */
   pthread_cleanup_push(worker_cleanup, NULL);
@@ -117,7 +145,7 @@ void *worker_thread(void *arg) {
     if (x == EAI_SYSTEM)
       perror("getaddrinfo");
     else
-      DBG("getaddrinfo: %s\n", gai_strerror(x));
+      fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(x));
     return NULL;
   }
   if (net.rcv_info->ai_addr->sa_family != AF_INET) {
@@ -135,14 +163,23 @@ void *worker_thread(void *arg) {
   if (connect(net.sock, net.rcv_info->ai_addr,
         net.rcv_info->ai_addrlen) != 0) {
     perror("connect");
-    DBG("can't connect to %s at port %u\n", params.addr, params.port);
-    DBG("sin_port=%04x\n", ip4->sin_port);
-    DBG("sin_addr=%08x\n", ip4->sin_addr.s_addr);
     return NULL;
   }
-  if (dprintf(net.sock, "Hello!\n") < 0) {
-    DBG("dprintf: error\n");
-    return NULL;
+  
+  uint32_t confirmed = 0, sent = 0;
+  while (true) {
+    while (confirmed + param.window < sent + 1) {
+      char buf[64];
+      ssize_t x = recv(net.sock, buf, sizeof(buf), 0);
+      if (x == 0)
+        return NULL; /* socket closed */
+      if (x < 0) {
+        perror("recv");
+        return NULL;
+      }
+      confirmed += x;
+    }
+    sent += 1;
   }
 
   /* cleanup now */
@@ -252,6 +289,9 @@ int output_init(output_parameter *param) {
     OPRINT("Error: missing recipient's address\n");
     return 1;
   }
+  /* buffer will be allocated when the first frame is ready */
+  buffer.bytes = NULL;
+  buffer.size = 0;
   OPRINT("input plugin....: (%u) %s\n", params.input_number,
       pglobal->in[params.input_number].plugin);
   OPRINT("address.........: %s\n", params.addr);
