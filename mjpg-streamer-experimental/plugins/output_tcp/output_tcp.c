@@ -114,9 +114,18 @@ void *worker_thread(void *arg) {
     x = getaddrinfo(params.addr, NULL, &hints, &net.rcv_info);
   } while (x != 0 && x == EAI_AGAIN);
   if (x != 0) {
-    DBG("getaddrinfo: %s\n", gai_strerror(x));
+    if (x == EAI_SYSTEM)
+      perror("getaddrinfo");
+    else
+      DBG("getaddrinfo: %s\n", gai_strerror(x));
     return NULL;
   }
+  if (net.rcv_info->ai_addr->sa_family != AF_INET) {
+    DBG("getaddrinfo returned a protocol family different from AF_INET");
+    return NULL;
+  }
+  struct sockaddr_in *ip4 = (struct sockaddr_in *)(net.rcv_info->ai_addr);
+  ip4->sin_port = htons((uint16_t)params.port);
   net.sock = socket(net.rcv_info->ai_family, net.rcv_info->ai_socktype,
       net.rcv_info->ai_protocol);
   if (net.sock < 0) {
@@ -127,6 +136,8 @@ void *worker_thread(void *arg) {
         net.rcv_info->ai_addrlen) != 0) {
     perror("connect");
     DBG("can't connect to %s at port %u\n", params.addr, params.port);
+    DBG("sin_port=%04x\n", ip4->sin_port);
+    DBG("sin_addr=%08x\n", ip4->sin_addr.s_addr);
     return NULL;
   }
   if (dprintf(net.sock, "Hello!\n") < 0) {
