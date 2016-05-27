@@ -30,6 +30,7 @@
 #include "../../utils.h"
 #include "../../mjpg_streamer.h"
 #include "my_compiler.h"
+#include "stse.h"
 
 #define PLUGIN_NAME     "TCP output plugin"
 #define SHORT_HELP      "h"
@@ -66,7 +67,9 @@ static struct {
 static struct {
   char *bytes;
   uint32_t size;
-} buffer;
+} raw_buf;
+
+stse_buf_t encoded_buf;
 
 void help(void) {
   fprintf(stderr,
@@ -107,27 +110,43 @@ void worker_cleanup(void *arg) {
     close(net.sock);
 }
 
+static inline bool resize_buffers(uint32_t new_frame_size) {
+}
+
 bool grab_frame(uint32_t *size) {
   uint32_t in_num = params->input_number;
   pthread_mutex_lock(&pglobal->in[in_num].db);
   pthread_cond_wait(&pglobal->in[in_num].db_update, &pglobal->in[in_num].db);
   uint32_t frame_size = pglobal->in[in_num].size;
-  if (frame_size > buffer.size) {
+  if (frame_size > raw_buf.size) {
     DBG("increasing buffer size from %u to %u\n", buffer.size, frame_size);
-    buffer.size += 1 << 16;
-    char *tmp_bytes = realloc(buffer.bytes, buffer.size);
+    raw_buf.size += 1 << 16;
+    uint8_t *tmp_bytes = realloc(raw_buf.bytes, raw_buf.size);
     if (tmp_bytes == NULL) {
       pthread_mutex_unlock(&pglobal->in[in_num].db);
       LOG("not enough memory\n");
       return false;
     }
-    buffer.bytes = tmp_bytes;
+    raw_buf.bytes = tmp_bytes;
+
+    encoded_buf.size = 2 * raw_buf.size + 2;
+    tmp_bytes = realloc(encoded_buf.bytes, encoded_buf.size);
+    if (tmp_bytes == NULL) {
+      pthread_mutex_unlock(&pglobal->in[in_num].db);
+      LOG("not enough memory\n");
+      return false;
+    }
   }
   memcpy(buffer.bytes, pglobal->in[in_num].buf, frame_size);
   pthread_mutex_unlock(&pglobal->in[in_num].db);
 
   *size = frame_size;
   return true;
+}
+
+bool transmit_frame(uint32_t size) {
+  // todo
+  return false;
 }
 
 void *worker_thread(void *arg) {
@@ -179,6 +198,11 @@ void *worker_thread(void *arg) {
       }
       confirmed += x;
     }
+    uint32_t frame_size;
+    if (!grab_frame(&frame_size))
+      break;
+    if (!transmit_frame(frame_size))
+      break;
     sent += 1;
   }
 
