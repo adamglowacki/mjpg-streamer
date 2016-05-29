@@ -113,8 +113,9 @@ void worker_cleanup(void *arg) {
 }
 
 static inline bool resize_buffers(uint32_t new_frame_size) {
+  uint32_t prev_buf_size = raw_buf.size;
   raw_buf.size = 2 * new_frame_size;
-  DBG("increasing buffer size from %u to %u\n", raw_buf.size, raw_buf.size);
+  DBG("increasing buffer size from %u to %u\n", prev_buf_size, raw_buf.size);
   uint8_t *tmp = realloc(raw_buf.bytes, raw_buf.size);
   if (tmp == NULL)
     return false;
@@ -241,10 +242,11 @@ static inline bool is_arg(const char *chosen, const char *short_option,
 /* return zero if everything is ok */
 int output_init(output_parameter *param) {
   param->argv[0] = PLUGIN_NAME;
+
   /* show all parameters for debug purposes */
   uint32_t i;
   for(i = 0; i < param->argc; i++)
-    DBG("argv[%d]=%s\n", i, param->argv[i]);
+    DBG("argv[%u]=%s\n", i, param->argv[i]);
 
   /* default parameters */
   params.input_number = 0;
@@ -288,11 +290,11 @@ int output_init(output_parameter *param) {
       return 1;
     const char *choice = long_options[option_index].name;
     if (is_arg(choice, SHORT_HELP, LONG_HELP)) {
-      DBG("help param");
+      DBG("help param\n");
       help();
       return 1;
     } else if (is_arg(choice, SHORT_ADDR, LONG_ADDR)) {
-      DBG("addr param");
+      DBG("addr param\n");
       if (params.addr != NULL)
         free(params.addr);
       params.addr = malloc(strlen(optarg) + 1);
@@ -302,19 +304,19 @@ int output_init(output_parameter *param) {
       }
       strcpy(params.addr, optarg);
     } else if (is_arg(choice, SHORT_PORT, LONG_PORT)) {
-      DBG("port param");
+      DBG("port param\n");
       if (sscanf(optarg, "%u", &params.port) != 1)
         return 1;
     } else if (is_arg(choice, SHORT_WINDOW, LONG_WINDOW)) {
-      DBG("window param");
+      DBG("window param\n");
       if (sscanf(optarg, "%u", &params.window) != 1)
         return 1;
     } else if (is_arg(choice, SHORT_TIMEOUT, LONG_TIMEOUT)) {
-      DBG("timeout param");
+      DBG("timeout param\n");
       if (sscanf(optarg, "%u", &params.timeout_s))
         return 1;
     } else if (is_arg(choice, SHORT_INPUT, LONG_INPUT)) {
-      DBG("input param");
+      DBG("input param\n");
       if (sscanf(optarg, "%u", &params.input_number))
         return 1;
     }
@@ -322,7 +324,7 @@ int output_init(output_parameter *param) {
 
   pglobal = param->global;
   if (params.input_number >= pglobal->incnt) {
-    OPRINT("Error: the %u input plugin number is too much for only"
+    OPRINT("Error: the %u input plugin number is too large for only"
         " %u plugins loaded\n", params.input_number, pglobal->incnt);
     return 1;
   }
