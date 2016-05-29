@@ -48,8 +48,6 @@
 
 static pthread_t worker;
 static globals *pglobal;
-static uint32_t max_frame_size;
-static uint8_t *frame = NULL;
 
 static struct {
   uint32_t input_number;
@@ -65,8 +63,9 @@ static struct {
 } net;
 
 static struct {
-  char *bytes;
+  uint8_t *bytes;
   uint32_t size;
+  uint32_t used;
 } raw_buf;
 
 stse_buf_t encoded_buf;
@@ -100,52 +99,71 @@ void worker_cleanup(void *arg) {
   is_first_run = 0;
   OPRINT("cleaning up resources allocated by worker thread\n");
 
-  if (frame != NULL)
-    free(frame);
+  if (net.sock >= 0)
+    close(net.sock);
 
   if (net.rcv_info != NULL)
     freeaddrinfo(net.rcv_info);
 
-  if (net.sock >= 0)
-    close(net.sock);
+  if (raw_buf.bytes != NULL)
+    free(raw_buf.bytes);
+
+  if (encoded_buf.bytes != NULL)
+    free(encoded_buf.bytes);
 }
 
 static inline bool resize_buffers(uint32_t new_frame_size) {
-}
+  raw_buf.size = 2 * new_frame_size;
+  DBG("increasing buffer size from %u to %u\n", raw_buf.size, raw_buf.size);
+  uint8_t *tmp = realloc(raw_buf.bytes, raw_buf.size);
+  if (tmp == NULL)
+    return false;
+  raw_buf.bytes = tmp;
 
-bool grab_frame(uint32_t *size) {
-  uint32_t in_num = params->input_number;
-  pthread_mutex_lock(&pglobal->in[in_num].db);
-  pthread_cond_wait(&pglobal->in[in_num].db_update, &pglobal->in[in_num].db);
-  uint32_t frame_size = pglobal->in[in_num].size;
-  if (frame_size > raw_buf.size) {
-    DBG("increasing buffer size from %u to %u\n", buffer.size, frame_size);
-    raw_buf.size += 1 << 16;
-    uint8_t *tmp_bytes = realloc(raw_buf.bytes, raw_buf.size);
-    if (tmp_bytes == NULL) {
-      pthread_mutex_unlock(&pglobal->in[in_num].db);
-      LOG("not enough memory\n");
-      return false;
-    }
-    raw_buf.bytes = tmp_bytes;
+  encoded_buf.size = 2 * raw_buf.size + 2;
+  tmp = realloc(encoded_buf.bytes, encoded_buf.size);
+  if (tmp == NULL)
+    return false;
+  encoded_buf.bytes = tmp;
 
-    encoded_buf.size = 2 * raw_buf.size + 2;
-    tmp_bytes = realloc(encoded_buf.bytes, encoded_buf.size);
-    if (tmp_bytes == NULL) {
-      pthread_mutex_unlock(&pglobal->in[in_num].db);
-      LOG("not enough memory\n");
-      return false;
-    }
-  }
-  memcpy(buffer.bytes, pglobal->in[in_num].buf, frame_size);
-  pthread_mutex_unlock(&pglobal->in[in_num].db);
-
-  *size = frame_size;
   return true;
 }
 
-bool transmit_frame(uint32_t size) {
-  // todo
+bool grab_frame(void) {
+  uint32_t in_num = params.input_number;
+  pthread_mutex_lock(&pglobal->in[in_num].db);
+  pthread_cond_wait(&pglobal->in[in_num].db_update, &pglobal->in[in_num].db);
+  uint32_t frame_size = pglobal->in[in_num].size;
+  if (frame_size > raw_buf.size && !resize_buffers(frame_size)) {
+    pthread_mutex_unlock(&pglobal->in[in_num].db);
+    LOG("not enough memory\n");
+    return false;
+  }
+  memcpy(raw_buf.bytes, pglobal->in[in_num].buf, frame_size);
+  raw_buf.used = frame_size;
+  pthread_mutex_unlock(&pglobal->in[in_num].db);
+
+  return true;
+}
+
+bool transmit_frame(void) {
+  encoded_buf.used = 0;
+  if (!stse_start(&encoded_buf))
+    return false;
+  if (!stse_append(&encoded_buf, raw_buf.bytes, raw_buf.used))
+    return false;
+  if (!stse_end(&encoded_buf))
+    return false;
+  ssize_t x;
+  x = send(net.sock, encoded_buf.bytes, encoded_buf.used, 0);
+  if (x == -1) {
+    perror("send");
+    return false;
+  } else if (x < encoded_buf.used) {
+    LOG("can't transmit the whole frame\n");
+    return false;
+  }
+
   return false;
 }
 
@@ -187,7 +205,7 @@ void *worker_thread(void *arg) {
   
   uint32_t confirmed = 0, sent = 0;
   while (true) {
-    while (confirmed + param.window < sent + 1) {
+    while (confirmed + params.window < sent + 1) {
       char buf[64];
       ssize_t x = recv(net.sock, buf, sizeof(buf), 0);
       if (x == 0)
@@ -198,11 +216,10 @@ void *worker_thread(void *arg) {
       }
       confirmed += x;
     }
-    uint32_t frame_size;
-    if (!grab_frame(&frame_size))
-      break;
-    if (!transmit_frame(frame_size))
-      break;
+    if (!grab_frame())
+      return NULL;
+    if (!transmit_frame())
+      return NULL;
     sent += 1;
   }
 
@@ -313,9 +330,11 @@ int output_init(output_parameter *param) {
     OPRINT("Error: missing recipient's address\n");
     return 1;
   }
-  /* buffer will be allocated when the first frame is ready */
-  buffer.bytes = NULL;
-  buffer.size = 0;
+  /* buffers will be allocated when the first frame is ready */
+  raw_buf.bytes = NULL;
+  raw_buf.size = 0;
+  encoded_buf.bytes = NULL;
+  encoded_buf.size = 0;
   OPRINT("input plugin....: (%u) %s\n", params.input_number,
       pglobal->in[params.input_number].plugin);
   OPRINT("address.........: %s\n", params.addr);
