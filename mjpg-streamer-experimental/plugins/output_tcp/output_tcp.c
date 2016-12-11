@@ -149,12 +149,18 @@ bool grab_frame(void) {
 
 bool transmit_frame(void) {
   encoded_buf.used = 0;
-  if (!stse_start(&encoded_buf))
+  if (!stse_start(&encoded_buf)) {
+    DBG("stse_start(..) failed\n");
     return false;
-  if (!stse_append(&encoded_buf, raw_buf.bytes, raw_buf.used))
+  }
+  if (!stse_append(&encoded_buf, raw_buf.bytes, raw_buf.used)) {
+    DBG("stse_append(..) failed\n");
     return false;
-  if (!stse_end(&encoded_buf))
+  }
+  if (!stse_end(&encoded_buf)) {
+    DBG("stse_end(..) failed\n");
     return false;
+  }
   ssize_t x;
   x = send(net.sock, encoded_buf.bytes, encoded_buf.used, 0);
   if (x == -1) {
@@ -165,7 +171,7 @@ bool transmit_frame(void) {
     return false;
   }
 
-  return false;
+  return true;
 }
 
 void *worker_thread(void *arg) {
@@ -207,20 +213,31 @@ void *worker_thread(void *arg) {
   uint32_t confirmed = 0, sent = 0;
   while (true) {
     while (confirmed + params.window < sent + 1) {
+      DBG("waiting for acks\n");
       char buf[64];
       ssize_t x = recv(net.sock, buf, sizeof(buf), 0);
-      if (x == 0)
+      if (x == 0) {
+        DBG("socket closed\n");
         return NULL; /* socket closed */
+      }
       if (x < 0) {
         perror("recv");
         return NULL;
       }
+      DBG("received %d acks\n, x");
       confirmed += x;
     }
-    if (!grab_frame())
+    DBG("wait for new frame\n");
+    if (!grab_frame()) {
+      DBG("grab_frame() failed\n");
       return NULL;
-    if (!transmit_frame())
+    }
+    DBG("transmit the frame\n");
+    if (!transmit_frame()) {
+      DBG("transmit_frame() failed\n");
       return NULL;
+    }
+    DBG("frame transmitted\n");
     sent += 1;
   }
 
